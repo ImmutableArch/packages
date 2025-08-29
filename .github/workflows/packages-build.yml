@@ -107,6 +107,8 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+        contents: write
     steps:
       - name: Checkout repository (for gh-pages)
         uses: actions/checkout@v4
