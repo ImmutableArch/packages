@@ -41,49 +41,39 @@ jobs:
         run: |
           set -euo pipefail
           SRC_DIR=$(pwd)
-          # ensure /tmp/aur-repo exists and is writable by builder
           mkdir -p /tmp/aur-repo
           chown -R builder:builder /tmp/aur-repo
 
           while IFS= read -r line || [ -n "$line" ]; do
-            # strip comments and whitespace
             pkg=$(echo "$line" | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
             [ -z "$pkg" ] && continue
             echo "Processing: $pkg"
             cd /home/builder/src
 
             if [[ "$pkg" =~ ^https?:// ]]; then
-              # clone remote git URL as builder so files are owned by builder
-              sudo -u builder -H git clone --depth 1 "$pkg" || (echo "shallow clone failed, retrying full clone" && sudo -u builder -H git clone "$pkg")
+              sudo -u builder -H git clone --depth 1 "$pkg" || sudo -u builder -H git clone "$pkg"
               d=$(basename "$pkg" .git)
             elif [ -d "$SRC_DIR/$pkg" ]; then
-              # local folder inside the repo: copy it into builder's src and chown
               rm -rf "/home/builder/src/$pkg" || true
               cp -a "$SRC_DIR/$pkg" /home/builder/src/
               chown -R builder:builder "/home/builder/src/$pkg"
               d=$(basename "$pkg")
             else
-              # assume it's an AUR package name -> clone from aur.archlinux.org as builder
               sudo -u builder -H git clone "https://aur.archlinux.org/${pkg}.git" || { echo "Failed cloning AUR ${pkg}, skipping"; continue; }
               d="$pkg"
             fi
 
-            # Build as non-root user. Skip PGP check to avoid interactive prompts in CI.
-            sudo -u builder -H bash -lc "cd /home/builder/src/${d} && makepkg --noconfirm --skippgpcheck --syncdeps" || { echo "makepkg failed for ${d}, continuing to next"; continue; }
+            sudo -u builder -H bash -lc "cd /home/builder/src/${d} && makepkg --noconfirm --skippgpcheck --syncdeps" || { echo "makepkg failed for ${d}, continuing"; continue; }
 
-            # Copy built packages to repo dir. Keep files readable by CI (owner may be builder).
             shopt -s nullglob
             pkgs=(/home/builder/src/"${d}"/*.pkg.*)
             if [ ${#pkgs[@]} -gt 0 ]; then
               cp -v /home/builder/src/"${d}"/*.pkg.* /tmp/aur-repo/ || true
             else
-              echo "No packages found for ${d}"
+              echo "No packages built for ${d}"
             fi
 
-            # ensure CI can read/write the repo folder for next steps
             chown -R $(id -u):$(id -g) /tmp/aur-repo || true
-
-            cd /home/builder/src
           done < "$SRC_DIR/aur-packages"
 
           echo "Build step finished. Contents of /tmp/aur-repo:"
@@ -100,12 +90,10 @@ jobs:
             echo "No built packages to add to repo. Skipping repo-add."
             exit 0
           fi
-          # use "immutablearch" as repository name; adjust if you want a different name
           DBNAME=immutablearch.db.tar.gz
           if [ ! -f "$DBNAME" ]; then
             repo-add "$DBNAME"
           fi
-          # add/update all found packages
           repo-add "$DBNAME" "${pkgs[@]}" || true
           ls -la
 
@@ -114,6 +102,7 @@ jobs:
         with:
           name: aur-repo
           path: /tmp/aur-repo
+          if-no-files-found: warn
 
   publish:
     needs: build
@@ -125,6 +114,11 @@ jobs:
           name: aur-repo
           path: ./aur-repo
 
+      - name: Debug artifact contents
+        run: |
+          echo "Listing ./aur-repo after download:"
+          ls -R ./aur-repo || true
+
       - name: Checkout repository (for gh-pages)
         uses: actions/checkout@v4
         with:
@@ -135,13 +129,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # fetch remote branches
           git fetch origin gh-pages || true
 
           if git rev-parse --verify --quiet origin/gh-pages >/dev/null 2>&1; then
             git checkout gh-pages
           else
-            # create orphan gh-pages and push it
             git checkout --orphan gh-pages
             git rm -rf . || true
             git commit --allow-empty -m "Initialize gh-pages"
@@ -152,11 +144,13 @@ jobs:
       - name: Copy repo files into gh-pages (packages/)
         run: |
           set -euo pipefail
-          # Put packages under ./packages so GitHub Pages serves them cleanly
           rm -rf ./packages || true
           mkdir -p ./packages
-          cp -r ./aur-repo/* ./packages/
-          # If there's an index db created by repo-add, ensure it's at repo root or in packages
+          if [ -d ./aur-repo ] && [ "$(ls -A ./aur-repo)" ]; then
+            cp -r ./aur-repo/* ./packages/
+          else
+            echo "No built packages to copy into gh-pages."
+          fi
           ls -la ./packages || true
 
       - name: Commit and push gh-pages
@@ -166,7 +160,6 @@ jobs:
         run: |
           set -euo pipefail
           git add --all
-          # commit only if changes exist
           if ! git diff --staged --quiet; then
             git commit -m "Update AUR repo packages [ci skip]" || true
             git push origin gh-pages
