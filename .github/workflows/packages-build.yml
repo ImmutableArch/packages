@@ -108,22 +108,17 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download built repo artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: aur-repo
-          path: ./aur-repo
-
-      - name: Debug artifact contents
-        run: |
-          echo "Listing ./aur-repo after download:"
-          ls -R ./aur-repo || true
-
       - name: Checkout repository (for gh-pages)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
+
+      - name: Download built repo artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: aur-repo
+          path: ./aur-repo
 
       - name: Ensure gh-pages branch exists and checkout
         shell: bash
