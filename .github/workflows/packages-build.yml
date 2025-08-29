@@ -10,34 +10,30 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # run inside an archlinux container so pacman/makepkg work
     container:
       image: archlinux:latest
-    outputs:
-      repo-path: ${{ steps.save.outputs.repo_dir }}
+
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup pacman environment
+      - name: Install required packages (pacman)
         run: |
           pacman -Sy --noconfirm --needed archlinux-keyring
           pacman -Sy --noconfirm --needed base-devel git pacman-contrib sudo
           pacman-key --init
           pacman-key --populate archlinux
 
-      - name: Create builder user
+      - name: Create builder user and prepare directories
         run: |
-          useradd -m builder
-          echo "builder ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/builder
+          useradd -m builder || true
           mkdir -p /home/builder/src
-          chown -R builder:builder /home/builder
-
-      - name: Prepare output repo dir
-        run: |
           mkdir -p /tmp/aur-repo
+          echo "builder ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/builder
+          chown -R builder:builder /home/builder
+          chown -R builder:builder /home/builder/src
           chown -R builder:builder /tmp/aur-repo
 
       - name: Build packages listed in aur-packages
@@ -45,47 +41,75 @@ jobs:
         run: |
           set -euo pipefail
           SRC_DIR=$(pwd)
+          # ensure /tmp/aur-repo exists and is writable by builder
+          mkdir -p /tmp/aur-repo
+          chown -R builder:builder /tmp/aur-repo
+
           while IFS= read -r line || [ -n "$line" ]; do
+            # strip comments and whitespace
             pkg=$(echo "$line" | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
             [ -z "$pkg" ] && continue
             echo "Processing: $pkg"
             cd /home/builder/src
-            # if it's a git URL
+
             if [[ "$pkg" =~ ^https?:// ]]; then
-              git clone --depth 1 "$pkg" || (echo "clone failed, retrying shallow full clone" && git clone "$pkg")
+              # clone remote git URL as builder so files are owned by builder
+              sudo -u builder -H git clone --depth 1 "$pkg" || (echo "shallow clone failed, retrying full clone" && sudo -u builder -H git clone "$pkg")
               d=$(basename "$pkg" .git)
             elif [ -d "$SRC_DIR/$pkg" ]; then
-              # local folder in repo
-              cp -r "$SRC_DIR/$pkg" .
+              # local folder inside the repo: copy it into builder's src and chown
+              rm -rf "/home/builder/src/$pkg" || true
+              cp -a "$SRC_DIR/$pkg" /home/builder/src/
+              chown -R builder:builder "/home/builder/src/$pkg"
               d=$(basename "$pkg")
             else
-              # assume AUR package name
-              git clone "https://aur.archlinux.org/${pkg}.git" || { echo "Failed cloning AUR $pkg"; continue; }
+              # assume it's an AUR package name -> clone from aur.archlinux.org as builder
+              sudo -u builder -H git clone "https://aur.archlinux.org/${pkg}.git" || { echo "Failed cloning AUR ${pkg}, skipping"; continue; }
               d="$pkg"
             fi
-            cd "$d"
-            # build as non-root user; skip PGP checks to avoid interactive key imports
-            sudo -u builder bash -lc "cd /home/builder/src/${d} && makepkg --noconfirm --skippgpcheck --syncdeps"
-            # copy built packages to repo dir
+
+            # Build as non-root user. Skip PGP check to avoid interactive prompts in CI.
+            sudo -u builder -H bash -lc "cd /home/builder/src/${d} && makepkg --noconfirm --skippgpcheck --syncdeps" || { echo "makepkg failed for ${d}, continuing to next"; continue; }
+
+            # Copy built packages to repo dir. Keep files readable by CI (owner may be builder).
             shopt -s nullglob
-            cp -v /home/builder/src/${d}/*.pkg.* /tmp/aur-repo/ || true
+            pkgs=(/home/builder/src/"${d}"/*.pkg.*)
+            if [ ${#pkgs[@]} -gt 0 ]; then
+              cp -v /home/builder/src/"${d}"/*.pkg.* /tmp/aur-repo/ || true
+            else
+              echo "No packages found for ${d}"
+            fi
+
+            # ensure CI can read/write the repo folder for next steps
+            chown -R $(id -u):$(id -g) /tmp/aur-repo || true
+
             cd /home/builder/src
           done < "$SRC_DIR/aur-packages"
-          echo "Built packages stored in /tmp/aur-repo"
 
-      - name: Create repo database with repo-add
+          echo "Build step finished. Contents of /tmp/aur-repo:"
+          ls -la /tmp/aur-repo || true
+
+      - name: Create/Update repo database with repo-add
+        shell: bash
         run: |
+          set -euo pipefail
           cd /tmp/aur-repo
-          # initialize empty db if not exist
-          if [ ! -f immutablearch.db.tar.gz ]; then
-            repo-add immutablearch.db.tar.gz
+          shopt -s nullglob
+          pkgs=( *.pkg.* )
+          if [ ${#pkgs[@]} -eq 0 ]; then
+            echo "No built packages to add to repo. Skipping repo-add."
+            exit 0
           fi
-          # add all packages (repo-add will update db)
-          repo-add immutablearch.db.tar.gz *.pkg.* || true
-          ls -l
+          # use "immutablearch" as repository name; adjust if you want a different name
+          DBNAME=immutablearch.db.tar.gz
+          if [ ! -f "$DBNAME" ]; then
+            repo-add "$DBNAME"
+          fi
+          # add/update all found packages
+          repo-add "$DBNAME" "${pkgs[@]}" || true
+          ls -la
 
-      - name: Save repo as artifact
-        id: save
+      - name: Upload built repo as artifact
         uses: actions/upload-artifact@v4
         with:
           name: aur-repo
@@ -95,47 +119,62 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download built repo
+      - name: Download built repo artifact
         uses: actions/download-artifact@v4
         with:
           name: aur-repo
           path: ./aur-repo
 
-      - name: Checkout gh-pages branch
+      - name: Checkout repository (for gh-pages)
         uses: actions/checkout@v4
         with:
-          persist-credentials: true
           fetch-depth: 0
-          ref: gh-pages || master
+          persist-credentials: true
 
-      - name: Prepare gh-pages branch (create if missing)
+      - name: Ensure gh-pages branch exists and checkout
+        shell: bash
         run: |
-          set -e
-          if ! git show-ref --verify --quiet refs/heads/gh-pages; then
+          set -euo pipefail
+          # fetch remote branches
+          git fetch origin gh-pages || true
+
+          if git rev-parse --verify --quiet origin/gh-pages >/dev/null 2>&1; then
+            git checkout gh-pages
+          else
+            # create orphan gh-pages and push it
             git checkout --orphan gh-pages
-            git rm -rf .
+            git rm -rf . || true
             git commit --allow-empty -m "Initialize gh-pages"
-            git push -u origin gh-pages
+            git push origin gh-pages
+            git checkout gh-pages
           fi
-          git checkout gh-pages
 
-      - name: Copy repo files into site folder
+      - name: Copy repo files into gh-pages (packages/)
         run: |
+          set -euo pipefail
+          # Put packages under ./packages so GitHub Pages serves them cleanly
           rm -rf ./packages || true
           mkdir -p ./packages
           cp -r ./aur-repo/* ./packages/
-          # ensure index and packages present
-          ls -la ./packages
+          # If there's an index db created by repo-add, ensure it's at repo root or in packages
+          ls -la ./packages || true
 
-      - name: Commit and push to gh-pages
+      - name: Commit and push gh-pages
         env:
           GIT_AUTHOR_NAME: "github-actions"
           GIT_AUTHOR_EMAIL: "actions@github.com"
         run: |
+          set -euo pipefail
           git add --all
-          git commit -m "Update AUR repo (packages) [skip ci]" || echo "No changes to commit"
-          git push origin gh-pages
+          # commit only if changes exist
+          if ! git diff --staged --quiet; then
+            git commit -m "Update AUR repo packages [ci skip]" || true
+            git push origin gh-pages
+          else
+            echo "No changes to publish"
+          fi
 
-      - name: Optionally enable GitHub Pages (info)
+      - name: Info - GitHub Pages Setup
         run: |
-          echo "Your packages are now on the gh-pages branch. Configure GitHub Pages in repository settings to publish from branch 'gh-pages' (root) or use the repository settings UI."
+          echo "The packages are on the gh-pages branch under the 'packages/' folder."
+          echo "If GitHub Pages is not yet enabled, go to Settings → Pages and set source to branch 'gh-pages' (root)."
