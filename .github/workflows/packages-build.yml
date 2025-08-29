@@ -149,11 +149,10 @@ jobs:
           ls -la ./packages || true
 
       - name: Commit and push gh-pages
-        env:
-          GIT_AUTHOR_NAME: "github-actions"
-          GIT_AUTHOR_EMAIL: "actions@github.com"
         run: |
           set -euo pipefail
+          git config --global user.email "actions@github.com"
+          git config --global user.name "github-actions"
           git add --all
           if ! git diff --staged --quiet; then
             git commit -m "Update AUR repo packages [ci skip]" || true
