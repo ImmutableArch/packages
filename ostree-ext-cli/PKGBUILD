@@ -10,7 +10,8 @@ depends=('ostree')
 makedepends=('rust' 'cargo' 'git')
 source=("git+https://github.com/ostreedev/ostree-rs-ext.git"
         "Cargo.toml")
-sha256sums=('SKIP')
+sha256sums=('SKIP'
+            'SKIP')
 
 build() {
 
