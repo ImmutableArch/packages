@@ -19,7 +19,7 @@ build() {
     cp "$srcdir/Cargo.toml" "$srcdir/ostree-rs-ext/cli/Cargo.toml"
 
     cd "$srcdir/ostree-rs-ext/cli"
-    cargo build --release --locked
+    cargo build --release
 }
 
 package() {
