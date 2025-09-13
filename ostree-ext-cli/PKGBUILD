@@ -1,0 +1,27 @@
+# Maintainer: Mikołaj Ziółkowski <mikolajziolkowski504@gmail.com>
+pkgname=ostree-ext-cli
+pkgver=0.15.3
+pkgrel=1
+pkgdesc="Extended CLI tools for OSTree written in Rust"
+arch=('x86_64')
+url="https://github.com/ostreedev/ostree-rs-ext"
+license=('MIT')
+depends=('ostree')
+makedepends=('rust' 'cargo' 'git')
+source=("git+https://github.com/ostreedev/ostree-rs-ext.git"
+        "Cargo.toml")
+sha256sums=('SKIP')
+
+build() {
+
+    # Kopiujemy plik Cargo.toml (jeśli jest osobno)
+    cp "$srcdir/Cargo.toml" "$srcdir/ostree-ext/$pkgname/Cargo.toml"
+
+    cd "$srcdir/ostree-ext/$pkgname"
+    cargo build --release --locked
+}
+
+package() {
+    cd "$srcdir/ostree-ext"
+    install -Dm755 target/release/ostree-ext-cli "$pkgdir/usr/bin/ostree-ext-cli"
+}

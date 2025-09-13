@@ -1,5 +1,3 @@
-libsepol
-libselinux
-ostree
+ostree-ext-cli
 bootc-git
 bootupd-git
