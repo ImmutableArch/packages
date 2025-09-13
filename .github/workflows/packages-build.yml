@@ -63,7 +63,7 @@ jobs:
               d="$pkg"
             fi
 
-            sudo -u builder -H bash -lc "cd /home/builder/src/${d} && makepkg --noconfirm --skippgpcheck --syncdeps" || { echo "makepkg failed for ${d}, continuing"; continue; }
+            sudo -u builder -H bash -lc "cd /home/builder/src/${d} && makepkg -i --noconfirm --skippgpcheck --syncdeps" || { echo "makepkg failed for ${d}, continuing"; continue; }
 
             shopt -s nullglob
             pkgs=(/home/builder/src/"${d}"/*.pkg.*)
