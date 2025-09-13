@@ -23,6 +23,6 @@ build() {
 }
 
 package() {
-    cd "$srcdir/ostree-rs/ext"
+    cd "$srcdir/ostree-rs-ext/"
     install -Dm755 target/release/ostree-ext-cli "$pkgdir/usr/bin/ostree-ext-cli"
 }
