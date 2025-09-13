@@ -80,9 +80,9 @@ prepare() {
 
 build() {
   local configure_options=(
-    --disable-static
-    --enable-experimental-api
+    --disable-silent-rules
     --enable-gtk-doc
+    --with-selinux
     --libexecdir=/usr/lib
     --localstatedir=/var
     --prefix=/usr
@@ -94,6 +94,7 @@ build() {
     --with-grub2-mkconfig-path=/usr/bin/grub-mkconfig
     --with-mkinitcpio
     --with-modern-grub
+    --without-soup
     --with-openssl
   )
 
