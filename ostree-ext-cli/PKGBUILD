@@ -16,9 +16,9 @@ sha256sums=('SKIP'
 build() {
 
     # Kopiujemy plik Cargo.toml (jeśli jest osobno)
-    cp "$srcdir/Cargo.toml" "$srcdir/ostree-ext/$pkgname/Cargo.toml"
+    cp "$srcdir/Cargo.toml" "$srcdir/ostree-ext/cli/Cargo.toml"
 
-    cd "$srcdir/ostree-ext/$pkgname"
+    cd "$srcdir/ostree-ext/cli"
     cargo build --release --locked
 }
 
