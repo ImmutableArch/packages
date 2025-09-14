@@ -116,6 +116,22 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
+      - name: Ensure gh-pages branch exists and checkout
+        shell: bash
+        run: |
+            set -euo pipefail
+            git fetch origin gh-pages || true
+
+            if git rev-parse --verify --quiet origin/gh-pages >/dev/null 2>&1; then
+                git checkout gh-pages
+            else
+                git checkout --orphan gh-pages
+                git rm -rf . || true
+                git commit --allow-empty -m "Initialize gh-pages"
+                git push origin gh-pages
+                git checkout gh-pages
+            fi
+
       - name: Download built repo artifact
         uses: actions/download-artifact@v4
         with:
