@@ -1,3 +1,5 @@
+efi-filesystem
+grub-efi
 bootc-git
 bootupd-git
 pacman-ostree
