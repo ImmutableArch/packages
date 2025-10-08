@@ -2,4 +2,5 @@ efi-filesystem
 grub-efi
 bootc-git
 bootupd-git
+shim-fedora
 pacman-ostree
