@@ -1,0 +1,62 @@
+# Maintainer: Mikołaj Ziółkowski <mikolajziolkowski504@gmail.com>
+pkgname=bootc
+pkgver=1.10.0
+pkgrel=1
+pkgdesc="Bootable container system"
+arch=('x86_64')
+url="https://github.com/bootc-dev/bootc"
+license=('Apache' 'BSD' 'MIT')
+depends=('composefs' 'ostree' 'skopeo' 'podman' 'util-linux' 'go-md2man')
+makedepends=('zstd' 'make' 'ostree' 'openssl' 'cargo' 'systemd')
+source=(
+    "$url/releases/download/v$pkgver/bootc-$pkgver.tar.zstd"
+    "$url/releases/download/v$pkgver/bootc-$pkgver-vendor.tar.zstd"
+)
+sha256sums=('SKIP' 'SKIP') # zastąp prawdziwymi sumami
+
+# -------------------
+# Funkcja prepare
+# -------------------
+prepare() {
+    cd "$srcdir/$pkgname-$pkgver"
+
+    # Skopiowanie konfiguracji vendor
+    cp .cargo/vendor-config.toml .
+    cat vendor-config.toml >> .cargo/config.toml
+    rm vendor-config.toml
+
+    # Utworzenie katalogu vendor z zależnościami
+    cargo vendor > .cargo/config.toml
+}
+
+# -------------------
+# Funkcja build
+# -------------------
+build() {
+    cd "$srcdir/$pkgname-$pkgver"
+
+    make all
+}
+
+# -------------------
+# Funkcja package
+# -------------------
+package() {
+    cd "$srcdir/$pkgname-$pkgver"
+
+    # Instalacja wszystkich plików do pkgdir
+    make install-all DESTDIR="$pkgdir"
+
+    # Przeniesienie helperów z /usr/libexec/libostree do /usr/lib/libostree
+    if [ -d "$pkgdir/usr/libexec/libostree" ]; then
+        mkdir -p "$pkgdir/usr/lib/libostree"
+        mv "$pkgdir/usr/libexec/libostree"/* "$pkgdir/usr/lib/libostree/"
+        rmdir "$pkgdir/usr/libexec/libostree"
+    fi
+
+    # Dokumentacja
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm644 LICENSE-MIT "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
+    install -Dm644 LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
+}
+
