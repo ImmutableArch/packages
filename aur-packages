@@ -1,5 +1,5 @@
 grub-efi
-bootc-git
+bootc
 bootupd-git
 shim-fedora
 pacman-ostree
